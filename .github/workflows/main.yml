@@ -1,36 +1,71 @@
 name: Main Checks
 
-on: [push]
+on:
+  workflow_dispatch:
 
 jobs:
   test-node:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
-        node-version: [6.x, 8.x, 10.x, 12.x, 14.x]
+        node-version: [17.x, 6.x, 8.x, 10.x, 12.x, 14.x]
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v1
+      uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
+    - name: Pin the npm registry to the release date
+      run: |
+        npm config set registry https://time-machines-npm.sealsecurity.io/
+        npm config set //time-machines-npm.sealsecurity.io/:_authToken 2022-03-30T00:12:21.829000Z
+        npm config set always-auth true
     - run: npm install
+      env:
+        # webpack 4 hashes with md4, which OpenSSL 3 (Node 17+) refuses; the
+        # `prepublish` hook runs it during install. Empty on the older legs,
+        # where node rejects the unknown option.
+        NODE_OPTIONS: ${{ matrix.node-version == '17.x' && '--openssl-legacy-provider' || '' }}
     - name: Run test with Node.js ${{ matrix.node-version }}
       run: npm run test-node
+    - name: Build the distribution bundles
+      if: matrix.node-version == '17.x'
+      run: npm run build
+      env:
+        NODE_OPTIONS: --openssl-legacy-provider
+    - name: Pack the npm tarball
+      if: matrix.node-version == '17.x'
+      run: npm pack
+      env:
+        NODE_OPTIONS: --openssl-legacy-provider
+    - name: Upload the npm tarball
+      if: matrix.node-version == '17.x'
+      uses: actions/upload-artifact@v4
+      with:
+        name: npm-tarball
+        path: node-forge-*.tgz
+        if-no-files-found: error
   test-karma:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
         node-version: [14.x]
         bundler: [webpack, browserify]
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v1
+      uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
+    - name: Pin the npm registry to the release date
+      run: |
+        npm config set registry https://time-machines-npm.sealsecurity.io/
+        npm config set //time-machines-npm.sealsecurity.io/:_authToken 2022-03-30T00:12:21.829000Z
+        npm config set always-auth true
     - run: npm install
     - name: Run karma tests
       run: npm run test-karma
@@ -51,23 +86,3 @@ jobs:
 #    - run: npm install
 #    - name: Run eslint
 #      run: npm run lint
-  coverage:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      matrix:
-        node-version: [14.x]
-    steps:
-    - uses: actions/checkout@v2
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v1
-      with:
-        node-version: ${{ matrix.node-version }}
-    - run: npm install
-    - name: Generate coverage report
-      run: npm run coverage-ci
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v1
-      with:
-        file: ./coverage/lcov.info
-        fail_ci_if_error: true
